@@ -2,6 +2,7 @@ const fs = require('q-io/fs');
 const css = require('css');
 const path = require('path');
 const csvStringify = require('csv-stringify-as-promised');
+const BPromise = require('bluebird');
 
 const maybeSome = (items = [], fn) => items.some(fn);
 
@@ -66,15 +67,19 @@ const getInitStat = (eventId, length) => {
 const main = async () => {
     const dir = path.join(__dirname, 'css');
     const files = await fs.list(dir);
-    const stats = await Promise.all(
-        files.map(async file => {
+
+    const stats = await BPromise.map(
+        files,
+        async file => {
             const eventId = file.match(/^\d+/)[0];
             const filePath = path.join(dir, file);
+
+            console.warn(`eventId=${eventId}, file=${file}: reading...`);
             const fileContents = await fs.read(filePath);
             const length = fileContents.length;
             const initStat = getInitStat(eventId, length);
             console.warn(
-                `eventId=${eventId}, file=${file}: read ${length} characters`
+                `eventId=${eventId}, file=${file}: read ${length} characters.`
             );
 
             try {
@@ -82,18 +87,16 @@ const main = async () => {
                 const stats = getStatistics(initStat, ast);
                 return stats;
             } catch (e) {
-                console.warn(
-                    `Illegal CSS: ${JSON.stringify(
-                        fileContents.substr(0, 50)
-                    )}... ${e.stack}`
-                );
                 return Object.assign({}, initStat, {
                     error: 1,
                     digest: fileContents.substr(0, 50),
                     errorStack: e.stack.toString()
                 });
             }
-        })
+        },
+        {
+            concurrency: 4
+        }
     );
 
     console.log(await csvStringify(stats, { header: true }));
